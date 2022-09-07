@@ -1,0 +1,21 @@
+name: stable-diffusion
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.8.5
+  - pip=20.3
+  - cudatoolkit=11.3
+  - pytorch=1.11.0
+  - torchvision=0.12.0
+  - numpy=1.19.2
+  - pip:
+    - albumentations==0.4.3
+    - diffusers
+    - opencv-python==4.1.2.30
+    - pudb==2019.2
+    - imageio==2.9.0
+    - imageio-ffmpeg==0.4.2
+    - einops==0.3.0
+    - transformers==4.19.2
+    - torchmetrics==0.6.0
