@@ -1,9 +1,11 @@
-## Stable DreamBooth
+## Stable DreamBooth(Work in Progress)
 This is an unofficial implementation of [DreamBooth](https://dreambooth.github.io/) based on [stable diffusion](https://github.com/CompVis/stable-diffusion).
 
-This project is still work in progress, the performance should be improved.
 
 ## Results
+***Current results are often unstable, the performance will be improved under continuous development.***
+
+![Results](assets/results.png)
 
 ## Environment requirements
 Create conda environment with pytorch>=1.11.
@@ -38,9 +40,13 @@ The generation results are in `logs/dog_finetune`.
     ```
 
 ### 3. Inference
-TODO.
+```bash
+python inference.py --prompt "a special dog" --checkpoint_dir "logs/dog_finetune"
+```
+Generated images are in `outputs` by default.
 
 ## Acknowledgement
 
 - Stable Diffusion by CompVis https://github.com/CompVis/stable-diffusion
 - DreamBooth https://dreambooth.github.io/
+- Diffusers https://github.com/huggingface/diffusers

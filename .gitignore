@@ -2,3 +2,4 @@ logs/*
 .cache/*
 data/*
 scripts/*
+outputs/*
