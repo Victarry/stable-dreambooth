@@ -2,11 +2,12 @@ import dataclasses
 import json
 import os
 from dataclasses import dataclass
+from dataset import TrainDataset
 
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
-from diffusers.schedulers import DDPMScheduler
+from diffusers.schedulers import DDPMScheduler, LMSDiscreteScheduler
 from diffusers.pipelines import StableDiffusionPipeline
 from PIL import Image
 from tqdm.auto import tqdm
@@ -16,11 +17,16 @@ from pathlib import Path
 
 @dataclass
 class TrainingConfig:
+    # Task specific parameters
+    instance_prompt = "a special dog"
+    class_prompt = "a dog"
+    evaluate_prompt = ["a special dog"] * 4 + ["a dog"] * 4 + ["a happy special dog"] * 4 + ["a screaming special dog"]*4
+    data_path = "./data/dogs"
+
     # Basic Training Parameters
-    num_epochs: int = 300
-    train_batch_size: int = 5
-    eval_batch_size: int = 4 # how many images to sample during evaluation
-    learning_rate: float = 1e-5
+    num_epochs: int = 2
+    train_batch_size: int = 4
+    learning_rate: float = 4e-6
     image_size: int = 512 # the generated image resolution
     gradient_accumulation_steps: int = 1
 
@@ -31,11 +37,11 @@ class TrainingConfig:
 
     # Practical Training Settings
     mixed_precision: str = 'no'  # `no` for float32, `fp16` for automatic mixed precision
-    save_image_epochs: int = 100
-    save_model_epochs: int = 100
-    output_dir: str = 'logs/ddpm_schedule_guide'
+    save_image_epochs: int = 1
+    save_model_epochs: int = 1
+    output_dir: str = 'logs/dog_finetune'
     overwrite_output_dir: bool = True  # overwrite the old model when re-running the notebook
-    seed: int = 0
+    seed: int = 42
 
 def pred(model, noisy_latent, time_steps, prompt, guidance_scale):
     batch_size = noisy_latent.shape[0]
@@ -74,7 +80,7 @@ def pred(model, noisy_latent, time_steps, prompt, guidance_scale):
     return noise_pred
    
 
-def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_scheduler, optimizer, train_dataloader, prompt):
+def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_scheduler, optimizer, train_dataloader):
     # Initialize accelerator and tensorboard logging
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
@@ -94,16 +100,18 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
     
     global_step = 0
 
-
     # Now you train the model
     for epoch in range(config.num_epochs):
         progress_bar = tqdm(total=len(train_dataloader), disable=not accelerator.is_local_main_process)
         progress_bar.set_description(f"Epoch {epoch}")
 
         for step, batch in enumerate(train_dataloader):
-            clean_images = batch['images']
+            instance_imgs, instance_prompt, class_imgs, class_prompt = batch
+            imgs = torch.cat((instance_imgs, class_imgs), dim=0)
+            prompt = instance_prompt + class_prompt
+
             # Sample noise to add to the images
-            bs = clean_images.shape[0]
+            bs = imgs.shape[0]
 
             # Sample a random timestep for each image
             timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (bs,), device=accelerator.device).long()
@@ -111,13 +119,13 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
             # Add noise to the clean images according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
             with torch.no_grad():
-                latents = model.vae.encode(clean_images).mode() * 0.18215
+                latents = model.vae.encode(imgs).mode() * 0.18215
             noise = torch.randn(latents.shape, device=accelerator.device)
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps.cpu().numpy())
 
             with accelerator.accumulate(model):
                 # Predict the noise residual
-                noise_pred = pred(model, noisy_latents, timesteps, prompt * config.train_batch_size, guidance_scale=config.train_guidance_scale)
+                noise_pred = pred(model, noisy_latents, timesteps, prompt, guidance_scale=config.train_guidance_scale)
                 loss = F.mse_loss(noise_pred, noise)
                 accelerator.backward(loss)
 
@@ -135,7 +143,7 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
         if accelerator.is_main_process:
 
             if epoch % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
-                evaluate(config, epoch, model, prompt * config.eval_batch_size)
+                evaluate(config, epoch, model)
 
             # if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
             #     model.save_pretrained(config.output_dir) 
@@ -147,40 +155,25 @@ def make_grid(images, rows, cols):
         grid.paste(image, box=(i%cols*w, i//cols*h))
     return grid
 
-def evaluate(config: TrainingConfig, epoch, pipeline: StableDiffusionPipeline, prompt):
+def evaluate(config: TrainingConfig, epoch, pipeline: StableDiffusionPipeline):
     # Sample some images from random noise (this is the backward diffusion process).
     # The default pipeline output type is `List[PIL.Image]`
     with torch.no_grad():
         with torch.autocast("cuda"):
-            images = pipeline(prompt, num_inference_steps=50, width=config.image_size, height=config.image_size, guidance_scale=config.sample_guidance_scale)["sample"]
+            images = pipeline(config.evaluate_prompt, num_inference_steps=50, width=config.image_size, height=config.image_size, guidance_scale=config.sample_guidance_scale)["sample"]
 
     # Make a grid out of the images
-    image_grid = make_grid(images, rows=2, cols=2)
+    image_grid = make_grid(images, rows=4, cols=4)
 
     # Save the images
     test_dir = os.path.join(config.output_dir, "samples")
     os.makedirs(test_dir, exist_ok=True)
     image_grid.save(f"{test_dir}/{epoch:04d}.jpg")
 
-
-def get_dataloader():
-    dataset = load_dataset("imagefolder", data_dir="./data/dogs/instance", split="train", cache_dir="./.cache")
-    preprocess = transforms.Compose(
-        [
-            transforms.Resize((config.image_size, config.image_size)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ]
-    )
-    def transform(examples):
-        images = [preprocess(image.convert("RGB")) for image in examples["image"]]
-        return {"images": images}
-
-    dataset.set_transform(transform)
+def get_dataloader(config: TrainingConfig):
+    dataset = TrainDataset(config.data_path, config.instance_prompt, config.class_prompt, config.image_size)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=config.train_batch_size, shuffle=True, drop_last=True, pin_memory=True)
     return dataloader
-
 
 if __name__ == "__main__":
     config = TrainingConfig()
@@ -200,10 +193,8 @@ if __name__ == "__main__":
         print("Run 'huggingface-cli login' to store auth token.")
         exit(1)
 
-    train_dataloader = get_dataloader()
+    train_dataloader = get_dataloader(config)
     optimizer = torch.optim.AdamW(model.unet.parameters(), lr=config.learning_rate)
     noise_scheduler = DDPMScheduler(num_train_timesteps=config.num_train_timesteps, beta_start=0.00085, beta_end=0.0120)
 
-    prompt = ["a photo of a dog"]
-
-    train_loop(config, model, noise_scheduler, optimizer, train_dataloader, prompt=prompt)
+    train_loop(config, model, noise_scheduler, optimizer, train_dataloader)

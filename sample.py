@@ -1,11 +1,10 @@
 from diffusers.pipelines import StableDiffusionPipeline
 import torch
 
-sample_nums = 200
+sample_nums = 1000
 batch_size = 16
 prompt = "a photo of dog"
 save_dir = "data/dogs/class"
-
 
 
 if __name__ == "__main__":
