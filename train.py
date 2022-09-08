@@ -2,6 +2,7 @@ import dataclasses
 import json
 import os
 from dataclasses import dataclass
+from typing import List
 from dataset import TrainDataset
 
 import torch
@@ -18,15 +19,16 @@ from pathlib import Path
 @dataclass
 class TrainingConfig:
     # Task specific parameters
-    instance_prompt = "a special dog"
-    class_prompt = "a dog"
-    evaluate_prompt = ["a special dog"] * 4 + ["a dog"] * 4 + ["a happy special dog"] * 4 + ["a screaming special dog"]*4
-    data_path = "./data/dogs"
+    instance_prompt: str = "photo of a [V] dog"
+    class_prompt: str = "photo of a dog"
+    evaluate_prompt = ["photo of a [V] dog"] * 4 + ["photo of a [V] dog in a doghouse"] * 4 + ["photo of a [V] dog in a bucket"] * 4 + ["photo of a sleeping [V] dog"]*4
+    data_path: str = "./data/dogs"
+    identifier: str = "sks"
 
     # Basic Training Parameters
-    num_epochs: int = 2
+    num_epochs: int = 1
     train_batch_size: int = 4
-    learning_rate: float = 4e-6
+    learning_rate: float = 1e-5
     image_size: int = 512 # the generated image resolution
     gradient_accumulation_steps: int = 1
 
@@ -36,12 +38,17 @@ class TrainingConfig:
     sample_guidance_scale: float = 7.5 # guidance scale at inference
 
     # Practical Training Settings
-    mixed_precision: str = 'no'  # `no` for float32, `fp16` for automatic mixed precision
+    mixed_precision: str = 'fp16'  # `no` for float32, `fp16` for automatic mixed precision
     save_image_epochs: int = 1
     save_model_epochs: int = 1
     output_dir: str = 'logs/dog_finetune'
     overwrite_output_dir: bool = True  # overwrite the old model when re-running the notebook
     seed: int = 42
+
+    def __post_init__(self):
+        self.instance_prompt = self.instance_prompt.replace("[V]", self.identifier)
+        self.evaluate_prompt = [s.replace("[V]", self.identifier) for s in self.evaluate_prompt]
+        
 
 def pred(model, noisy_latent, time_steps, prompt, guidance_scale):
     batch_size = noisy_latent.shape[0]
@@ -52,7 +59,8 @@ def pred(model, noisy_latent, time_steps, prompt, guidance_scale):
         truncation=True,
         return_tensors="pt",
     )
-    text_embeddings = model.text_encoder(text_input.input_ids.to(model.device))[0]
+    with torch.no_grad():
+        text_embeddings = model.text_encoder(text_input.input_ids.to(model.device))[0]
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
     # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
@@ -85,8 +93,7 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         gradient_accumulation_steps=config.gradient_accumulation_steps, 
-        log_with="tensorboard",
-        logging_dir=os.path.join(config.output_dir, "logs")
+
     )
     if accelerator.is_main_process:
         accelerator.init_trackers("train_example")
@@ -120,8 +127,8 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
             # (this is the forward diffusion process)
             with torch.no_grad():
                 latents = model.vae.encode(imgs).mode() * 0.18215
-            noise = torch.randn(latents.shape, device=accelerator.device)
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps.cpu().numpy())
+                noise = torch.randn(latents.shape, device=accelerator.device)
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps.cpu().numpy())
 
             with accelerator.accumulate(model):
                 # Predict the noise residual
@@ -129,7 +136,7 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
                 loss = F.mse_loss(noise_pred, noise)
                 accelerator.backward(loss)
 
-                # accelerator.clip_grad_norm_(model.unet.parameters(), 1.0)
+                accelerator.clip_grad_norm_(model.unet.parameters(), 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
             
@@ -141,12 +148,11 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
 
         # After each epoch you optionally sample some demo images with evaluate() and save the model
         if accelerator.is_main_process:
-
             if epoch % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
                 evaluate(config, epoch, model)
 
-            # if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
-            #     model.save_pretrained(config.output_dir) 
+            if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
+                model.save_pretrained(config.output_dir) 
 
 def make_grid(images, rows, cols):
     w, h = images[0].size

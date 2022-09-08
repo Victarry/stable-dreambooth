@@ -1,13 +1,15 @@
 ## Stable DreamBooth(Work in Progress)
-This is an unofficial implementation of [DreamBooth](https://dreambooth.github.io/) based on [stable diffusion](https://github.com/CompVis/stable-diffusion).
-
+This is an implementation of [DreamBooth](https://dreambooth.github.io/) based on [stable diffusion](https://github.com/CompVis/stable-diffusion).
 
 ## Results
-***Current results are often unstable, the performance will be improved under continuous development.***
+![Results](assets/results.jpg)
 
-![Results](assets/results.png)
+## Requirements
+### Hardware
+- A GPU with at least 30G Memory.
+- The training requires about 10 minites on A100 80G GPU with `batch_size` set to 4.
 
-## Environment requirements
+### Environment Setup
 Create conda environment with pytorch>=1.11.
 ```bash
 conda env create -f environment.yaml
@@ -41,7 +43,7 @@ The generation results are in `logs/dog_finetune`.
 
 ### 3. Inference
 ```bash
-python inference.py --prompt "a special dog" --checkpoint_dir "logs/dog_finetune"
+python inference.py --prompt "photo of a [V] dog in a dog house" --checkpoint_dir logs/dogs_finetune
 ```
 Generated images are in `outputs` by default.
 
