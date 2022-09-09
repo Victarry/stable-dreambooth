@@ -1,7 +1,13 @@
-## Stable DreamBooth(Work in Progress)
-This is an implementation of [DreamBooth](https://dreambooth.github.io/) based on [stable diffusion](https://github.com/CompVis/stable-diffusion).
+## Stable DreamBooth 
+
+This is an implementation of [DreamBooth](https://dreambooth.github.io/) based on [Stable Diffusion](https://github.com/CompVis/stable-diffusion).
 
 ## Results
+Dreambooth results from original paper:
+![Results](assets/dreambooth.jpg)
+
+
+The reproduced results:
 ![Results](assets/results.jpg)
 
 ## Requirements
