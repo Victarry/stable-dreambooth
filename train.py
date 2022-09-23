@@ -126,7 +126,7 @@ def train_loop(config: TrainingConfig, model: StableDiffusionPipeline, noise_sch
             # Add noise to the clean images according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
             with torch.no_grad():
-                latents = model.vae.encode(imgs).mode() * 0.18215
+                latents = model.vae.encode(imgs).latent_dist.sample() * 0.18215
                 noise = torch.randn(latents.shape, device=accelerator.device)
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps.cpu().numpy())
 
