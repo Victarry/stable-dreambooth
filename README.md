@@ -2,6 +2,11 @@
 
 This is an implementation of [DreamBooth](https://dreambooth.github.io/) based on [Stable Diffusion](https://github.com/CompVis/stable-diffusion).
 
+## Update
+- *This repository has been migrated into `diffusers`! Less than 14 GB memeory is required!*  
+See more in https://github.com/huggingface/diffusers/tree/main/examples/dreambooth
+
+
 ## Results
 Dreambooth results from original paper:
 ![Results](assets/dreambooth.jpg)
